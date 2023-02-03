@@ -1,0 +1,104 @@
+# для работы ansible понадобятся sshpass
+# запуск через ansible-playbook -i inventory.ini --ask-pass ci_playbook.yml 
+
+# чтобы запустился плейбук, пришлость добавить control в docker группу, иначе надо было бы все под рутом делать
+# сам плейбук в итоге, похоже, запускается под рутом. Когда плейбук выполнен, контейнеры работают. Чтобы их остановить, надо зайти под рутом в директорию, где запущены контейнеры (/home/control/demo-docker-build/) и остановить их через docker-compose down
+
+- hosts: docker_build
+  vars:
+    - file_Path: /home/control/demo-docker-build/
+  gather_facts: no
+  tasks:
+    - name: create build directory
+      file:
+        path: "{{file_Path}}"
+        state: directory
+        owner: control
+        group: control
+        mode: '0755'
+
+    - name: copy files and directories that docker-compose needs
+      copy:
+        src: ./{{ item }}
+        dest: "{{file_Path}}"
+        owner: control
+        group: control
+        mode: '0755'
+      loop:
+        - frontend
+        - backend
+        - docker-compose.yml
+        - change_docker-compose.py
+        
+
+    # use files parameter to use multiple docker-compose.yml files
+    - name: deploy Docker Compose stack
+      community.docker.docker_compose:
+        project_src: "{{file_Path}}"
+        build: true
+        state: absent # не запускаем контейнеры
+        files:
+          - docker-compose.yml
+
+    # сохраняем образ в тар архив
+    - name: extract files to archive
+      docker_image:
+        name: "demo-docker-build_{{ item }}"
+        archive_path: "{{file_Path}}{{item}}_image.tar"
+        state: present
+        source: local
+      loop:
+        - web
+        - backend
+    
+
+    # переносим образы в среду теста (в нашем случае) в другую папку
+    - name: create test directory
+      file:
+        path: /home/control/demo-docker-test
+        state: directory
+        owner: control
+        group: control
+        mode: '0755'
+    
+
+    - name: change docker config to use images instead of building them
+      shell: /usr/bin/python3 {{file_Path}}change_docker-compose.py {{file_Path}}
+      register: change_result
+    # - name: just debug
+    #   debug:
+    #     var: change_result.stdout == "True"
+
+
+    - name: copy Docker configs
+      copy:
+        src: "{{file_Path}}{{item}}"
+        dest: /home/control/demo-docker-test/
+        owner: control
+        group: control
+        mode: '0755'
+      loop:
+        - docker-compose.yml
+        - change_docker-compose.py
+      when: change_result.stdout == "True"
+
+
+    - name: copy Docker build images
+      copy:
+        src: "{{file_Path}}{{item}}_image.tar"
+        dest: /home/control/demo-docker-test/
+        owner: control
+        group: control
+        mode: '0755'
+      loop:
+        - web
+        - backend
+      when: change_result.stdout == "True"
+        
+
+    # удаляем папку, где мы собирали образы
+    - name: delete build directory
+      file:
+        path: "{{file_Path[:-1]}}"
+        state: absent
+      when: change_result.stdout == "True"

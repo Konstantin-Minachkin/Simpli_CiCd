@@ -1,0 +1,30 @@
+version: '3'
+
+services:
+  web:
+    container_name: web_service
+    # image: demo-docker-build_web
+    build: ./frontend
+    command: python3 main_program.py
+    networks:
+      - servers-net
+    ports:
+      - "12345:12345" #[порт компьютера, где запущен контейнер]:[порт контейнера]
+
+  backend:
+    container_name: backend_service
+    # image: demo-docker-build_backend
+    build: ./backend
+    command: python3 main_program.py
+    networks:
+      - servers-net
+    expose:
+      - "12346" 
+    depends_on: #показывает, что сервис должен дождаться готовности первого сервиса прежде, чем запуститься
+      - web
+
+
+networks:
+  servers-net:
+    driver: bridge
+    

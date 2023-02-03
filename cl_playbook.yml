@@ -1,0 +1,78 @@
+- hosts: docker_test
+  vars:
+    - file_Path: /home/control/demo-docker-test/
+  gather_facts: no
+  tasks:
+
+    - name: unpack Docker images
+      docker_image:
+          name: "demo-docker-build_{{ item }}"
+          load_path: "{{file_Path}}{{item}}_image.tar"
+          state: present
+          source: load
+      loop:
+        - web
+        - backend
+
+
+    #delete after test
+    # - name: change docker config to use images instead of builds
+    #   shell: /usr/bin/python3 /home/control/demo-docker-test/change_docker-compose.py /home/control/demo-docker-test/
+    #   register: change_result
+
+
+    - name: run Docker images
+      community.docker.docker_compose:
+        project_src: "{{file_Path}}"
+        state: present
+
+
+    - name: run tests
+      shell: /usr/bin/python3 /home/control/CiClCd/autoTest.py
+      register: test_result
+    # - name: just debug
+    #   debug:
+    #     var: test_result.stdout == "False"
+        
+
+    - name: stop Docker images
+      community.docker.docker_compose:
+        project_src: "{{file_Path}}"
+        state: absent
+
+
+    # if tests are correct
+    - name: create prod directory
+    # сработает только раз, когда мы в другой раз выполним плэйбук задание просто будет пропущено
+      file:
+        path: /home/control/demo-docker-prod
+        state: directory
+        owner: control
+        group: control
+        mode: '0755'
+      when: test_result.stdout == "True"
+    
+    - name: copy Docker configs
+      copy:
+        src: "{{file_Path}}{{item}}"
+        dest: /home/control/demo-docker-prod/
+        owner: control
+        group: control
+        mode: '0755'
+      loop:
+        - docker-compose.yml
+      when: test_result.stdout == "True"
+
+    - name: copy images to prod
+      copy:
+        src: "{{file_Path}}{{item}}_image.tar"
+        dest: /home/control/demo-docker-prod/
+        owner: control
+        group: control
+        mode: '0755'
+      loop:
+        - web
+        - backend
+      when: test_result.stdout == "True"
+
+    # тестовая директория после всех тестов не удаляется, тк ci билд может провалиться, а протестировать приложение может понадобиться еще раз

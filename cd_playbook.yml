@@ -1,0 +1,31 @@
+- hosts: docker_prod
+  vars:
+    - file_Path: /home/control/demo-docker-prod/
+  gather_facts: no
+  tasks:
+
+    - name: unpack Docker images
+      docker_image:
+          name: "demo-docker-build_{{ item }}"
+          load_path: "{{file_Path}}{{item}}_image.tar"
+          state: present
+          source: load
+      loop:
+        - web
+        - backend
+
+    - name: run Docker images
+      community.docker.docker_compose:
+        project_src: "{{file_Path}}"
+        state: present
+
+    - name: do healthcheck
+    # Если серси работает, то таск выоплнится успешно
+      uri:
+        url: http://localhost:12345/?text=Hi
+        timeout: 10
+      register: test_result
+
+    - name: show service status
+      debug:
+        var: test_result
